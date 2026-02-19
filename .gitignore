@@ -1,0 +1,40 @@
+# Configuration file with sensitive data
+install_config.conf
+install_config_proxy.conf
+
+# Log files
+*.log
+/var/log/postgresql_pgadmin_install_*.log
+/var/log/apache_reverse_proxy_install_*.log
+
+# Backup directories
+/tmp/postgresql_pgadmin_backup_*/
+/tmp/apache_proxy_backup_*/
+
+# PostgreSQL backup files
+*.sql
+*.sql.gz
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Python cache (if using Python scripts)
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Temporary files
+*.tmp
+*.bak
+*.old
