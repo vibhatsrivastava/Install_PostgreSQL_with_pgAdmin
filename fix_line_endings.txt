@@ -1,0 +1,16 @@
+# Fix line endings on Linux server
+# Run these commands in your SSH session:
+
+# Option 1: Using dos2unix (recommended)
+sudo apt-get update
+sudo apt-get install -y dos2unix
+dos2unix install_config.conf install_config_proxy.conf install_postgresql_pgadmin.sh install_apache_reverse_proxy.sh
+
+# Option 2: Using sed (if dos2unix is not available)
+sed -i 's/\r$//' install_config.conf
+sed -i 's/\r$//' install_config_proxy.conf
+sed -i 's/\r$//' install_postgresql_pgadmin.sh
+sed -i 's/\r$//' install_apache_reverse_proxy.sh
+
+# Then run the installer again:
+sudo ./install_postgresql_pgadmin.sh

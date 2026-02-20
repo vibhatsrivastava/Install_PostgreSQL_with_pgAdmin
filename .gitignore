@@ -1,6 +1,6 @@
 # Configuration file with sensitive data
-install_config.conf
-install_config_proxy.conf
+# install_config.conf
+# install_config_proxy.conf
 
 # Log files
 *.log
