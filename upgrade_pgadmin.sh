@@ -94,12 +94,18 @@ display_banner() {
 
 cleanup_on_error() {
     local exit_code=$?
+    
+    # Disable ERR trap and 'set -e' to avoid recursive error handling
+    # or aborting in the middle of rollback/cleanup.
+    trap - ERR
+    set +e
+    
     log_error "Script failed with exit code: ${exit_code}"
     
     if [ "$UPGRADE_STARTED" = true ]; then
         if [ "${AUTO_ROLLBACK_ON_FAILURE:-yes}" = "yes" ]; then
             log_warning "Attempting automatic rollback..."
-            rollback_upgrade
+            rollback_upgrade || log_error "Automatic rollback encountered errors; manual intervention may be required."
         else
             log_warning "Automatic rollback is disabled"
             log_error "Backup location: ${BACKUP_DIR}"
@@ -184,6 +190,30 @@ get_current_version() {
     export OLD_MAJOR_VERSION=$major_version
 }
 
+extract_version_from_backup() {
+    log_info "Extracting version information from backup..."
+    
+    local state_file="${BACKUP_DIR}/system_state.txt"
+    
+    if [ ! -f "$state_file" ]; then
+        log_error "System state file not found in backup: ${state_file}"
+        log_error "Cannot determine previous version for package downgrade"
+        return 1
+    fi
+    
+    # Extract old version from system_state.txt
+    OLD_VERSION=$(grep "^Old Version:" "$state_file" | awk '{print $3}')
+    
+    if [ -z "$OLD_VERSION" ]; then
+        log_error "Unable to extract old version from backup"
+        log_error "Manual package downgrade may be required"
+        return 1
+    fi
+    
+    log_success "Extracted version from backup: ${OLD_VERSION}"
+    return 0
+}
+
 check_version_availability() {
     log_info "Checking if target version is available..."
     
@@ -210,15 +240,25 @@ check_version_availability() {
         
         NEW_VERSION="$available_version"
     else
-        # Check if specific version exists
-        if ! apt-cache policy pgadmin4-web | grep -q "$TARGET_VERSION"; then
-            log_error "Version ${TARGET_VERSION} not found in repository"
+        # Resolve target version to full APT version string
+        # This allows users to specify short forms like "9.13" which will match "9.13-1"
+        
+        # Escape special regex characters in TARGET_VERSION (especially dots)
+        local escaped_target=$(printf '%s\n' "$TARGET_VERSION" | sed 's/[.[\*^$()+?{|]/\\&/g')
+        
+        # Match version in apt-cache policy output with proper anchoring
+        # Pattern ensures we match the version at word boundary (version-revision format)
+        local resolved_version=$(apt-cache policy pgadmin4-web | grep -oP "^\s+\*?\*?\*?\s*\K${escaped_target}(-[0-9]+)?(\.[0-9]+)*" | head -n 1)
+        
+        if [ -z "$resolved_version" ]; then
+            log_error "Version matching ${TARGET_VERSION} not found in repository"
             log_info "Available versions:"
             apt-cache policy pgadmin4-web | grep -A 20 "Version table"
             exit 1
         fi
         
-        NEW_VERSION="$TARGET_VERSION"
+        NEW_VERSION="$resolved_version"
+        log_info "Resolved ${TARGET_VERSION} to full version: ${NEW_VERSION}"
         
         # Check if we're already on this version
         if [ "$OLD_VERSION" = "$NEW_VERSION" ] && [ "${FORCE_UPGRADE:-no}" != "yes" ]; then
@@ -255,6 +295,9 @@ check_version_availability() {
 # ====================
 
 load_config() {
+    # Save current log file (temp) so config file doesn't overwrite it
+    local temp_log_file="${LOG_FILE}"
+    
     log_info "Loading configuration from ${CONFIG_FILE}..."
     
     if [ ! -f "${CONFIG_FILE}" ]; then
@@ -265,6 +308,10 @@ load_config() {
     # Source the configuration file
     # shellcheck source=/dev/null
     source "${CONFIG_FILE}"
+    
+    # Save configured log path, then restore temp log for now
+    CONFIGURED_LOG_FILE="${LOG_FILE}"
+    LOG_FILE="${temp_log_file}"
     
     log_success "Configuration loaded successfully"
     
@@ -282,13 +329,21 @@ load_config() {
     fi
     
     # Validate boolean options
-    for var in PRESERVE_USER_DATA AUTO_ROLLBACK_ON_FAILURE DRY_RUN BACKUP_APACHE_CONFIGS BACKUP_SSL_CERTS; do
+    for var in PRESERVE_USER_DATA AUTO_ROLLBACK_ON_FAILURE DRY_RUN BACKUP_APACHE_CONFIGS BACKUP_SSL_CERTS SKIP_PREFLIGHT_CHECKS TEST_HTTPS FORCE_UPGRADE; do
         local value="${!var:-}"
         if [ "$value" != "yes" ] && [ "$value" != "no" ]; then
             log_error "${var} must be 'yes' or 'no', got: ${value}"
             exit 1
         fi
     done
+    
+    # Validate numeric options
+    if [ -n "${VERIFY_TIMEOUT:-}" ]; then
+        if ! [[ "${VERIFY_TIMEOUT}" =~ ^[0-9]+$ ]]; then
+            log_error "VERIFY_TIMEOUT must be a positive integer, got: ${VERIFY_TIMEOUT}"
+            exit 1
+        fi
+    fi
     
     log_success "Configuration validated successfully"
     log_info "Target Version: ${TARGET_VERSION}"
@@ -486,10 +541,18 @@ verify_upgrade() {
         # Test HTTPS if configured
         if [ "${TEST_HTTPS:-no}" = "yes" ]; then
             log_info "Testing HTTPS connectivity..."
-            if curl -k -s -o /dev/null -w "%{http_code}" --max-time "$timeout" "https://${CUSTOM_DOMAIN}/" | grep -q -E "^(200|302)$"; then
-                log_success "✓ HTTPS is working"
+            local https_code=$(curl -k -s -o /dev/null -w "%{http_code}" --max-time "$timeout" "https://${CUSTOM_DOMAIN}/")
+            
+            if echo "$https_code" | grep -q -E "^(200|302|301)$"; then
+                log_success "✓ HTTPS is working (HTTP $https_code)"
             else
-                log_warning "⚠ HTTPS test failed"
+                # Fallback: test /pgadmin4/ path explicitly
+                log_info "Testing HTTPS with /pgadmin4/ path..."
+                if curl -k -s -o /dev/null -w "%{http_code}" --max-time "$timeout" "https://${CUSTOM_DOMAIN}/pgadmin4/" | grep -q -E "^(200|302)$"; then
+                    log_success "✓ HTTPS is working at /pgadmin4/"
+                else
+                    log_warning "⚠ HTTPS test failed"
+                fi
             fi
         fi
     fi
@@ -579,11 +642,16 @@ rollback_upgrade() {
             log_success "Restored pgAdmin WSGI configuration"
         fi
         
-        # Restore VirtualHost configs
+        # Restore VirtualHost configs (exclude WSGI pgadmin4.conf)
         for vhost in "${BACKUP_DIR}"/apache/*.conf; do
             if [ -f "$vhost" ]; then
+                vhost_basename="$(basename "$vhost")"
+                # Skip the WSGI config, which is restored separately to conf-available
+                if [ "$vhost_basename" = "pgadmin4.conf" ]; then
+                    continue
+                fi
                 cp "$vhost" /etc/apache2/sites-available/
-                log_info "Restored: $(basename $vhost)"
+                log_info "Restored: $vhost_basename"
             fi
         done
     fi
@@ -650,7 +718,11 @@ display_summary() {
     echo "-------------------------------------------"
     echo "Default URL: http://localhost/pgadmin4/"
     if [ -n "${CUSTOM_DOMAIN:-}" ]; then
-        echo "Custom Domain: http${TEST_HTTPS:+s}://${CUSTOM_DOMAIN}/"
+        local scheme="http"
+        if [ "${TEST_HTTPS:-no}" = "yes" ]; then
+            scheme="https"
+        fi
+        echo "Custom Domain: ${scheme}://${CUSTOM_DOMAIN}/"
     fi
     echo ""
     
@@ -690,8 +762,38 @@ main() {
     # Set up error trap
     trap cleanup_on_error ERR
     
+    log_info "Temporary log file: ${LOG_FILE}"
+    
     # Load configuration
     load_config
+    
+    # Migrate to configured log file (after config is loaded)
+    if [ -n "${CONFIGURED_LOG_FILE:-}" ]; then
+        local temp_log="${LOG_FILE}"
+        local configured_log="${CONFIGURED_LOG_FILE}"
+        local log_dir="$(dirname "${configured_log}")"
+        
+        # Ensure log directory exists and is writable
+        if [ ! -d "${log_dir}" ]; then
+            if ! mkdir -p "${log_dir}" 2>/dev/null; then
+                log_warning "Cannot create log directory: ${log_dir}"
+                log_warning "Continuing with temporary log file: ${temp_log}"
+            fi
+        fi
+        
+        # Test if we can write to the configured log location
+        if [ ! -d "${log_dir}" ] || ! touch "${configured_log}" 2>/dev/null; then
+            log_warning "Cannot write to configured log file: ${configured_log}"
+            log_warning "Continuing with temporary log file: ${temp_log}"
+        else
+            # Copy temp log to configured location
+            if [ -f "${temp_log}" ]; then
+                cat "${temp_log}" > "${configured_log}" 2>/dev/null || true
+            fi
+            LOG_FILE="${configured_log}"
+            log_info "Log file set to: ${LOG_FILE}"
+        fi
+    fi
     
     # Pre-flight checks
     if [ "${SKIP_PREFLIGHT_CHECKS:-no}" != "yes" ]; then
@@ -729,6 +831,9 @@ main() {
 # Script Entry Point
 # ====================
 
+# Initialize logging early (before any log calls)
+LOG_FILE="$(mktemp -t pgadmin_upgrade_XXXXXX.log)"
+
 # Handle command-line arguments
 if [ $# -gt 0 ]; then
     case "$1" in
@@ -741,6 +846,29 @@ if [ $# -gt 0 ]; then
             fi
             BACKUP_DIR="$2"
             load_config
+            
+            # Migrate to configured log file
+            if [ -n "${CONFIGURED_LOG_FILE:-}" ]; then
+                local temp_log="${LOG_FILE}"
+                local configured_log="${CONFIGURED_LOG_FILE}"
+                local log_dir="$(dirname "${configured_log}")"
+                
+                if [ ! -d "${log_dir}" ]; then
+                    mkdir -p "${log_dir}" 2>/dev/null || true
+                fi
+                
+                if [ -d "${log_dir}" ] && touch "${configured_log}" 2>/dev/null; then
+                    [ -f "${temp_log}" ] && cat "${temp_log}" > "${configured_log}" 2>/dev/null || true
+                    LOG_FILE="${configured_log}"
+                fi
+            fi
+            
+            # Extract OLD_VERSION from backup before rollback
+            if ! extract_version_from_backup; then
+                log_warning "Could not extract version from backup"
+                log_warning "Package downgrade will be skipped, but configurations will be restored"
+            fi
+            
             rollback_upgrade
             exit 0
             ;;

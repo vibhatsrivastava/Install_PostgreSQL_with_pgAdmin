@@ -543,11 +543,16 @@ display_connection_info() {
 # =============================================================================
 
 cleanup_on_error() {
+    # Disable ERR trap and 'set -e' to avoid recursive error handling
+    # or aborting in the middle of rollback/cleanup.
+    trap - ERR
+    set +e
+    
     log_error "An error occurred during installation"
     
     if [ "$INSTALLATION_STARTED" = true ]; then
         log_info "Starting rollback process..."
-        rollback_installation
+        rollback_installation || log_error "Rollback encountered errors; manual intervention may be required."
     fi
     
     log_error "Installation failed. Check the log file for details: ${LOG_FILE}"

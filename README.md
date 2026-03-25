@@ -792,7 +792,7 @@ The script will:
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `TARGET_VERSION` | Version to upgrade to ("latest" or specific) | latest |
+| `TARGET_VERSION` | Version to upgrade to ("latest" or version like "9.13") - automatically resolved to full APT version | latest |
 | `PRESERVE_USER_DATA` | Keep server connections and preferences | yes |
 | `AUTO_ROLLBACK_ON_FAILURE` | Auto-rollback on verification failure | yes |
 | `DRY_RUN` | Test upgrade without making changes | no |
@@ -838,6 +838,8 @@ TARGET_VERSION="9.13"
 sudo ./upgrade_pgadmin.sh
 ```
 
+**Note**: You can specify short version numbers like `"9.13"`, and the script will automatically resolve them to the full APT package version (e.g., `"9.13-1"`). The script uses `apt-cache policy` to find the matching version with the Debian revision suffix.
+
 #### Dry Run (Test Without Changes)
 
 ```bash
@@ -878,8 +880,33 @@ If automatic rollback is disabled or you need to rollback later:
 # List available backups
 ls -lt /tmp/pgadmin_upgrade_backup_*/
 
-# Rollback using specific backup
-sudo ./upgrade_pgadmin.sh --rollback /tmp/pgadmin_upgrade_backup_20260325_143022
+# Rollback using specific backup (replace YYYYMMDD_HHMMSS with actual timestamp)
+sudo ./upgrade_pgadmin.sh --rollback /tmp/pgadmin_upgrade_backup_YYYYMMDD_HHMMSS
+```
+
+**What Manual Rollback Does:**
+
+The script will attempt to fully restore your previous pgAdmin installation:
+
+1. **Package Downgrade**: Automatically downgrades pgAdmin to the previous version if version information is found in the backup's `system_state.txt` file
+2. **Configuration Restore**: Restores all pgAdmin configuration files
+3. **User Data Restore**: Restores server connections and preferences
+4. **Apache Configuration**: Restores Apache WSGI and VirtualHost configurations
+5. **SSL Certificates**: Restores SSL certificates if they were backed up
+6. **Service Restart**: Restarts Apache and verifies pgAdmin is accessible
+
+**Note**: If the backup directory is missing the `system_state.txt` file or version information cannot be extracted, the script will:
+- Restore all configurations and data
+- Display a warning about package downgrade being skipped
+- Provide the manual command to downgrade the package
+
+**Manual Package Downgrade** (if needed):
+```bash
+# Check available versions
+apt-cache policy pgadmin4-web
+
+# Downgrade to specific version
+sudo apt-get install -y --allow-downgrades pgadmin4-web=<version>
 ```
 
 ### Verification After Upgrade
@@ -1025,8 +1052,8 @@ After verifying successful upgrade, you can remove old backups:
 # List backups with sizes
 du -sh /tmp/pgadmin_upgrade_backup_*/
 
-# Remove specific backup
-sudo rm -rf /tmp/pgadmin_upgrade_backup_20260325_143022
+# Remove specific backup (replace YYYYMMDD_HHMMSS with actual timestamp)
+sudo rm -rf /tmp/pgadmin_upgrade_backup_YYYYMMDD_HHMMSS
 
 # Remove all backups older than 30 days
 find /tmp -name "pgadmin_upgrade_backup_*" -type d -mtime +30 -exec rm -rf {} +
