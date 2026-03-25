@@ -357,7 +357,13 @@ backup_configurations() {
     log_info "Creating comprehensive backup of configurations..."
     
     BACKUP_DIR="${BACKUP_BASE_DIR}_$(date +%Y%m%d_%H%M%S)"
+    # Create backup directory with restrictive permissions to protect sensitive pgAdmin data
+    local original_umask
+    original_umask=$(umask)
+    umask 077
     mkdir -p "${BACKUP_DIR}"
+    umask "${original_umask}"
+    chmod 700 "${BACKUP_DIR}"
     
     log_info "Backup directory: ${BACKUP_DIR}"
     
