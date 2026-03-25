@@ -839,6 +839,7 @@ if [ $# -gt 0 ]; then
     case "$1" in
         --rollback)
             log_info "Manual rollback requested"
+            check_root
             if [ -z "${2:-}" ]; then
                 log_error "Please specify backup directory"
                 log_error "Usage: sudo ./upgrade_pgadmin.sh --rollback /path/to/backup"
