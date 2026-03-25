@@ -811,6 +811,9 @@ main() {
         check_version_availability
     else
         log_warning "Skipping pre-flight checks as requested"
+        # Still determine versions to ensure upgrade logic has required data
+        get_current_version
+        check_version_availability
     fi
     
     # Create backup
