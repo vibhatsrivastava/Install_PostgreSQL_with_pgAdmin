@@ -151,7 +151,8 @@ check_ubuntu_version() {
 check_pgadmin_exists() {
     log_info "Checking if pgAdmin4 is installed..."
     
-    if ! dpkg -l | grep -q "pgadmin4-web"; then
+    # Use dpkg-query for more reliable package detection
+    if ! dpkg-query -l pgadmin4-web 2>/dev/null | grep -q "^ii"; then
         log_error "pgAdmin4-web is not installed!"
         log_error "This script is for upgrading existing installations only."
         log_error "To install pgAdmin, run: sudo ./install_postgresql_pgadmin.sh"
