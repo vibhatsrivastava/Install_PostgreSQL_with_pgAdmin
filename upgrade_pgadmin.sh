@@ -842,10 +842,10 @@ if [ $# -gt 0 ]; then
             load_config
             
             # Migrate to configured log file
-            if [ -n "${LOG_FILE:-}" ]; then
-                local temp_log="$(ls -t /tmp/pgadmin_upgrade_*.log 2>/dev/null | head -1)"
-                local configured_log="${LOG_FILE}"
-                local log_dir="$(dirname "${configured_log}")"
+            if [ -n "${CONFIGURED_LOG_FILE:-}" ]; then
+                temp_log="${LOG_FILE}"
+                configured_log="${CONFIGURED_LOG_FILE}"
+                log_dir="$(dirname "${configured_log}")"
                 
                 if [ ! -d "${log_dir}" ]; then
                     mkdir -p "${log_dir}" 2>/dev/null || true
@@ -855,7 +855,9 @@ if [ $# -gt 0 ]; then
                     [ -f "${temp_log}" ] && cat "${temp_log}" > "${configured_log}" 2>/dev/null || true
                     LOG_FILE="${configured_log}"
                 else
+                    log_warning "Cannot write to configured log file: ${configured_log}"
                     LOG_FILE="${temp_log}"
+                    log_warning "Continuing with temporary log file: ${temp_log}"
                 fi
             fi
             
