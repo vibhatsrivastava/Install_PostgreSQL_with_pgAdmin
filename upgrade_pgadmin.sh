@@ -866,7 +866,10 @@ if [ $# -gt 0 ]; then
             fi
             
             # Extract OLD_VERSION from backup before rollback
-            if ! extract_version_from_backup; then
+            if extract_version_from_backup && [ -n "${OLD_VERSION}" ]; then
+                # Mark package as "upgraded" so rollback_upgrade() will attempt the downgrade
+                PACKAGE_UPGRADED=true
+            else
                 log_warning "Could not extract version from backup"
                 log_warning "Package downgrade will be skipped, but configurations will be restored"
             fi
