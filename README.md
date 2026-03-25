@@ -882,29 +882,36 @@ ls -lt /tmp/pgadmin_upgrade_backup_*/
 sudo ./upgrade_pgadmin.sh --rollback /tmp/pgadmin_upgrade_backup_YYYYMMDD_HHMMSS
 ```
 
-**What Manual Rollback Does:**
+**What Gets Restored (Guaranteed):**
 
-The script will attempt to fully restore your previous pgAdmin installation:
+Manual rollback always restores:
+- ✅ **Configuration Files**: All pgAdmin configuration from `/etc/pgadmin/`
+- ✅ **User Data**: Server connections and preferences from `/var/lib/pgadmin/`
+- ✅ **Apache Configuration**: WSGI and VirtualHost configurations
+- ✅ **SSL Certificates**: All SSL certificates if they were backed up
+- ✅ **Service Restart**: Apache is restarted and accessibility verified
 
-1. **Package Downgrade**: Automatically downgrades pgAdmin to the previous version if version information is found in the backup's `system_state.txt` file
-2. **Configuration Restore**: Restores all pgAdmin configuration files
-3. **User Data Restore**: Restores server connections and preferences
-4. **Apache Configuration**: Restores Apache WSGI and VirtualHost configurations
-5. **SSL Certificates**: Restores SSL certificates if they were backed up
-6. **Service Restart**: Restarts Apache and verifies pgAdmin is accessible
+**Package Downgrade (Conditional):**
 
-**Note**: If the backup directory is missing the `system_state.txt` file or version information cannot be extracted, the script will:
-- Restore all configurations and data
-- Display a warning about package downgrade being skipped
-- Provide the manual command to downgrade the package
+The script will **attempt to downgrade** the pgAdmin package to the previous version, but this requires:
+- The backup contains a valid `system_state.txt` file
+- Version information can be successfully extracted from the backup
 
-**Manual Package Downgrade** (if needed):
+**If version information is missing or invalid**, the script will:
+- ⚠️ Display a warning that package downgrade was skipped
+- ✅ Continue to restore all configurations and data (guaranteed above)
+- ℹ️ Provide the manual command to downgrade the package
+
+**Manual Package Downgrade** (if automatic downgrade fails):
 ```bash
 # Check available versions
 apt-cache policy pgadmin4-web
 
-# Downgrade to specific version
+# Downgrade to specific version (use version from backup or desired version)
 sudo apt-get install -y --allow-downgrades pgadmin4-web=<version>
+
+# Example: Downgrade to version 8.12
+sudo apt-get install -y --allow-downgrades pgadmin4-web=8.12-1
 ```
 
 ### Verification After Upgrade

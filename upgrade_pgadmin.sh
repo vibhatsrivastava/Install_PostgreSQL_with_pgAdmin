@@ -198,7 +198,6 @@ extract_version_from_backup() {
     if [ ! -f "$state_file" ]; then
         log_error "System state file not found in backup: ${state_file}"
         log_error "Cannot determine previous version for package downgrade"
-        log_error "The backup may be incomplete or corrupted"
         return 1
     fi
     
@@ -207,9 +206,7 @@ extract_version_from_backup() {
     
     if [ -z "$OLD_VERSION" ]; then
         log_error "Unable to extract old version from backup"
-        log_error "The system_state.txt file exists but doesn't contain version information"
-        log_info "Backup file location: ${state_file}"
-        log_info "You can check the file manually: cat ${state_file}"
+        log_error "Manual package downgrade may be required"
         return 1
     fi
     
@@ -844,31 +841,21 @@ if [ $# -gt 0 ]; then
             BACKUP_DIR="$2"
             load_config
             
-            # Migrate to configured log file (after config is loaded)
-            if [ -n "${CONFIGURED_LOG_FILE:-}" ]; then
-                local temp_log="${LOG_FILE}"
-                local configured_log="${CONFIGURED_LOG_FILE}"
+            # Migrate to configured log file
+            if [ -n "${LOG_FILE:-}" ]; then
+                local temp_log="$(ls -t /tmp/pgadmin_upgrade_*.log 2>/dev/null | head -1)"
+                local configured_log="${LOG_FILE}"
                 local log_dir="$(dirname "${configured_log}")"
                 
-                # Ensure log directory exists and is writable
                 if [ ! -d "${log_dir}" ]; then
-                    if ! mkdir -p "${log_dir}" 2>/dev/null; then
-                        log_warning "Cannot create log directory: ${log_dir}"
-                        log_warning "Continuing with temporary log file: ${temp_log}"
-                    fi
+                    mkdir -p "${log_dir}" 2>/dev/null || true
                 fi
                 
-                # Test if we can write to the configured log location
-                if [ ! -d "${log_dir}" ] || ! touch "${configured_log}" 2>/dev/null; then
-                    log_warning "Cannot write to configured log file: ${configured_log}"
-                    log_warning "Continuing with temporary log file: ${temp_log}"
-                else
-                    # Copy temp log to configured location
-                    if [ -f "${temp_log}" ]; then
-                        cat "${temp_log}" > "${configured_log}" 2>/dev/null || true
-                    fi
+                if [ -d "${log_dir}" ] && touch "${configured_log}" 2>/dev/null; then
+                    [ -f "${temp_log}" ] && cat "${temp_log}" > "${configured_log}" 2>/dev/null || true
                     LOG_FILE="${configured_log}"
-                    log_info "Log file set to: ${LOG_FILE}"
+                else
+                    LOG_FILE="${temp_log}"
                 fi
             fi
             
@@ -876,11 +863,6 @@ if [ $# -gt 0 ]; then
             if ! extract_version_from_backup; then
                 log_warning "Could not extract version from backup"
                 log_warning "Package downgrade will be skipped, but configurations will be restored"
-                echo ""
-                log_info "To manually downgrade the package after rollback:"
-                log_info "  1. Check available versions: apt-cache policy pgadmin4-web"
-                log_info "  2. Downgrade: sudo apt-get install -y --allow-downgrades pgadmin4-web=<version>"
-                echo ""
             fi
             
             rollback_upgrade

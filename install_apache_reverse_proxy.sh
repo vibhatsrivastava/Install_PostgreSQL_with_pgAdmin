@@ -523,7 +523,13 @@ display_connection_info() {
     echo "Check Apache status:  systemctl status apache2"
     echo "Restart Apache:       systemctl restart apache2"
     echo "View Apache logs:     tail -f /var/log/apache2/${APACHE_CONFIG_NAME}_*.log"
-    echo "Test connectivity:    curl -${ENABLE_SSL:+k}I http${ENABLE_SSL:+s}://${DOMAIN_NAME}/"
+    local scheme="http"
+    local curl_opts="-I"
+    if [ "${ENABLE_SSL:-no}" = "yes" ]; then
+        scheme="https"
+        curl_opts="-kI"
+    fi
+    echo "Test connectivity:    curl ${curl_opts} ${scheme}://${DOMAIN_NAME}/"
     echo "Edit VirtualHost:     nano /etc/apache2/sites-available/${APACHE_CONFIG_NAME}.conf"
     echo ""
     
