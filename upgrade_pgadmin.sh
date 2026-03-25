@@ -795,15 +795,18 @@ main() {
     
     # Pre-flight checks
     if [ "${SKIP_PREFLIGHT_CHECKS:-no}" != "yes" ]; then
+        # OS and service checks that can be optionally skipped
         check_root
         check_ubuntu_version
         check_pgadmin_exists
         check_apache_running
-        get_current_version
-        check_version_availability
     else
-        log_warning "Skipping pre-flight checks as requested"
+        log_warning "Skipping OS/service pre-flight checks as requested"
     fi
+
+    # Version detection and availability checks must always run
+    get_current_version
+    check_version_availability
     
     # Create backup
     backup_configurations
