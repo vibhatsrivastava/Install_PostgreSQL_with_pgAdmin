@@ -108,8 +108,13 @@ cleanup_on_error() {
             rollback_upgrade || log_error "Automatic rollback encountered errors; manual intervention may be required."
         else
             log_warning "Automatic rollback is disabled"
-            log_error "Backup location: ${BACKUP_DIR}"
-            log_error "To rollback manually, run: sudo ./upgrade_pgadmin.sh --rollback"
+            if [ -n "${BACKUP_DIR}" ]; then
+                log_error "Backup location: ${BACKUP_DIR}"
+                log_error "To rollback manually, run: sudo ./upgrade_pgadmin.sh --rollback \"${BACKUP_DIR}\""
+            else
+                log_error "Backup location could not be determined from this run."
+                log_error "To rollback manually, run: sudo ./upgrade_pgadmin.sh --rollback <backup_directory>"
+            fi
         fi
     fi
     
