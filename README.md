@@ -1061,7 +1061,7 @@ du -sh /tmp/pgadmin_upgrade_backup_*/
 sudo rm -rf /tmp/pgadmin_upgrade_backup_YYYYMMDD_HHMMSS
 
 # Remove all backups older than 30 days
-find /tmp -name "pgadmin_upgrade_backup_*" -type d -mtime +30 -exec rm -rf {} +
+sudo find /tmp -name "pgadmin_upgrade_backup_*" -type d -mtime +30 -exec rm -rf {} +
 ```
 
 ## Troubleshooting
