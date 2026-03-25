@@ -399,9 +399,9 @@ backup_configurations() {
         local vhost_count=0
         for vhost in /etc/apache2/sites-available/*.conf; do
             if [ -f "$vhost" ] && grep -q "pgadmin" "$vhost"; then
-                cp "$vhost" "${BACKUP_DIR}/apache/$(basename $vhost)"
+                cp "$vhost" "${BACKUP_DIR}/apache/$(basename "$vhost")"
                 vhost_count=$((vhost_count + 1))
-                log_info "Backed up: $(basename $vhost)"
+                log_info "Backed up: $(basename "$vhost")"
             fi
         done
         
