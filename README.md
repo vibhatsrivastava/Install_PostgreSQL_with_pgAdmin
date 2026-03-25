@@ -792,7 +792,7 @@ The script will:
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `TARGET_VERSION` | Version to upgrade to ("latest" or version like "9.13") - automatically resolved to full APT version | latest |
+| `TARGET_VERSION` | Version to upgrade to ("latest" or specific) | latest |
 | `PRESERVE_USER_DATA` | Keep server connections and preferences | yes |
 | `AUTO_ROLLBACK_ON_FAILURE` | Auto-rollback on verification failure | yes |
 | `DRY_RUN` | Test upgrade without making changes | no |
@@ -837,8 +837,6 @@ TARGET_VERSION="9.13"
 
 sudo ./upgrade_pgadmin.sh
 ```
-
-**Note**: You can specify short version numbers like `"9.13"`, and the script will automatically resolve them to the full APT package version (e.g., `"9.13-1"`). The script uses `apt-cache policy` to find the matching version with the Debian revision suffix.
 
 #### Dry Run (Test Without Changes)
 

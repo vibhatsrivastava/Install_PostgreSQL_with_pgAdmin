@@ -198,6 +198,7 @@ extract_version_from_backup() {
     if [ ! -f "$state_file" ]; then
         log_error "System state file not found in backup: ${state_file}"
         log_error "Cannot determine previous version for package downgrade"
+        log_error "The backup may be incomplete or corrupted"
         return 1
     fi
     
@@ -206,7 +207,9 @@ extract_version_from_backup() {
     
     if [ -z "$OLD_VERSION" ]; then
         log_error "Unable to extract old version from backup"
-        log_error "Manual package downgrade may be required"
+        log_error "The system_state.txt file exists but doesn't contain version information"
+        log_info "Backup file location: ${state_file}"
+        log_info "You can check the file manually: cat ${state_file}"
         return 1
     fi
     
@@ -242,13 +245,7 @@ check_version_availability() {
     else
         # Resolve target version to full APT version string
         # This allows users to specify short forms like "9.13" which will match "9.13-1"
-        
-        # Escape special regex characters in TARGET_VERSION (especially dots)
-        local escaped_target=$(printf '%s\n' "$TARGET_VERSION" | sed 's/[.[\*^$()+?{|]/\\&/g')
-        
-        # Match version in apt-cache policy output with proper anchoring
-        # Pattern ensures we match the version at word boundary (version-revision format)
-        local resolved_version=$(apt-cache policy pgadmin4-web | grep -oP "^\s+\*?\*?\*?\s*\K${escaped_target}(-[0-9]+)?(\.[0-9]+)*" | head -n 1)
+        local resolved_version=$(apt-cache policy pgadmin4-web | grep -oP "^\s+\K${TARGET_VERSION}[^\s]*" | head -n 1)
         
         if [ -z "$resolved_version" ]; then
             log_error "Version matching ${TARGET_VERSION} not found in repository"
@@ -848,9 +845,9 @@ if [ $# -gt 0 ]; then
             load_config
             
             # Migrate to configured log file
-            if [ -n "${CONFIGURED_LOG_FILE:-}" ]; then
-                local temp_log="${LOG_FILE}"
-                local configured_log="${CONFIGURED_LOG_FILE}"
+            if [ -n "${LOG_FILE:-}" ]; then
+                local temp_log="$(ls -t /tmp/pgadmin_upgrade_*.log 2>/dev/null | head -1)"
+                local configured_log="${LOG_FILE}"
                 local log_dir="$(dirname "${configured_log}")"
                 
                 if [ ! -d "${log_dir}" ]; then
@@ -860,6 +857,8 @@ if [ $# -gt 0 ]; then
                 if [ -d "${log_dir}" ] && touch "${configured_log}" 2>/dev/null; then
                     [ -f "${temp_log}" ] && cat "${temp_log}" > "${configured_log}" 2>/dev/null || true
                     LOG_FILE="${configured_log}"
+                else
+                    LOG_FILE="${temp_log}"
                 fi
             fi
             
