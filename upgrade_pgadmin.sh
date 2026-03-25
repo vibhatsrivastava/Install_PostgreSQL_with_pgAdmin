@@ -568,10 +568,20 @@ verify_pgadmin_data() {
     
     # Check storage directory
     if [ -d /var/lib/pgadmin/storage ]; then
-        if [ -w /var/lib/pgadmin/storage ]; then
-            log_success "✓ pgAdmin storage directory is writable"
+        # Verify writability as the pgAdmin runtime user (typically www-data)
+        if id -u www-data >/dev/null 2>&1; then
+            if sudo -u www-data test -w /var/lib/pgadmin/storage; then
+                log_success "✓ pgAdmin storage directory is writable by www-data"
+            else
+                log_warning "⚠ pgAdmin storage directory is not writable by www-data"
+            fi
         else
-            log_warning "⚠ pgAdmin storage directory is not writable"
+            # Fallback: check writability as the current user (likely root)
+            if [ -w /var/lib/pgadmin/storage ]; then
+                log_success "✓ pgAdmin storage directory is writable (checked as current user)"
+            else
+                log_warning "⚠ pgAdmin storage directory is not writable (checked as current user)"
+            fi
         fi
     else
         log_warning "⚠ pgAdmin storage directory does not exist"
