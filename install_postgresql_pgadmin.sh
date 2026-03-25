@@ -78,11 +78,17 @@ log_error() {
 
 cleanup_on_error() {
     local exit_code=$?
+    
+    # Disable ERR trap and 'set -e' to avoid recursive error handling
+    # or aborting in the middle of rollback/cleanup.
+    trap - ERR
+    set +e
+    
     log_error "Script failed with exit code: ${exit_code}"
     
     if [ "$INSTALLATION_STARTED" = true ]; then
         log_warning "Attempting rollback..."
-        rollback_installation
+        rollback_installation || log_error "Rollback encountered errors; manual intervention may be required."
     fi
     
     log_error "Installation failed. Check log file: ${LOG_FILE}"

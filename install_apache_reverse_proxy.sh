@@ -523,7 +523,13 @@ display_connection_info() {
     echo "Check Apache status:  systemctl status apache2"
     echo "Restart Apache:       systemctl restart apache2"
     echo "View Apache logs:     tail -f /var/log/apache2/${APACHE_CONFIG_NAME}_*.log"
-    echo "Test connectivity:    curl -${ENABLE_SSL:+k}I http${ENABLE_SSL:+s}://${DOMAIN_NAME}/"
+    local scheme="http"
+    local curl_opts="-I"
+    if [ "${ENABLE_SSL:-no}" = "yes" ]; then
+        scheme="https"
+        curl_opts="-kI"
+    fi
+    echo "Test connectivity:    curl ${curl_opts} ${scheme}://${DOMAIN_NAME}/"
     echo "Edit VirtualHost:     nano /etc/apache2/sites-available/${APACHE_CONFIG_NAME}.conf"
     echo ""
     
@@ -543,11 +549,16 @@ display_connection_info() {
 # =============================================================================
 
 cleanup_on_error() {
+    # Disable ERR trap and 'set -e' to avoid recursive error handling
+    # or aborting in the middle of rollback/cleanup.
+    trap - ERR
+    set +e
+    
     log_error "An error occurred during installation"
     
     if [ "$INSTALLATION_STARTED" = true ]; then
         log_info "Starting rollback process..."
-        rollback_installation
+        rollback_installation || log_error "Rollback encountered errors; manual intervention may be required."
     fi
     
     log_error "Installation failed. Check the log file for details: ${LOG_FILE}"
