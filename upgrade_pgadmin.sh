@@ -793,9 +793,11 @@ main() {
         fi
     fi
     
-    # Pre-flight checks
+    # Always enforce root/sudo privileges
+    check_root
+    
+    # Pre-flight checks (can be partially skipped)
     if [ "${SKIP_PREFLIGHT_CHECKS:-no}" != "yes" ]; then
-        check_root
         check_ubuntu_version
         check_pgadmin_exists
         check_apache_running
