@@ -717,6 +717,321 @@ sudo -u postgres psql -c "SELECT pg_database.datname, pg_size_pretty(pg_database
 sudo -u postgres psql -d myappdb -c "SELECT tablename, pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS size FROM pg_tables WHERE schemaname = 'public' ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC;"
 ```
 
+## Upgrading pgAdmin
+
+The `upgrade_pgadmin.sh` script provides a safe and reversible way to upgrade pgAdmin to a newer version while preserving all configurations, SSL certificates, custom domains, and user data (server connections and preferences).
+
+### Features
+
+- ✅ **Configuration Preservation**: Keeps all Apache VirtualHost configurations intact
+- ✅ **User Data Protection**: Preserves pgAdmin server connections and preferences
+- ✅ **SSL Certificate Retention**: Maintains existing SSL certificates
+- ✅ **Automatic Backup**: Creates comprehensive backup before upgrade
+- ✅ **Automatic Rollback**: Reverts to previous version on failure
+- ✅ **Dry Run Mode**: Test upgrade process without making changes
+- ✅ **Version Flexibility**: Upgrade to latest or specific version
+
+### Prerequisites
+
+- Existing pgAdmin4 installation (installed via `install_postgresql_pgadmin.sh`)
+- Root or sudo access
+- Internet connection for downloading packages
+
+### Quick Upgrade Guide
+
+#### 1. Configure Upgrade Settings
+
+Edit the `upgrade_pgadmin_config.conf` file:
+
+```bash
+nano upgrade_pgadmin_config.conf
+```
+
+**Important settings:**
+
+```bash
+# Target version ("latest" or specific version like "9.13")
+TARGET_VERSION="latest"
+
+# Preserve user data (server connections, preferences)
+PRESERVE_USER_DATA="yes"
+
+# Automatically rollback on failure
+AUTO_ROLLBACK_ON_FAILURE="yes"
+
+# Custom domain to test (if configured)
+CUSTOM_DOMAIN="postgresql.local"
+
+# Test HTTPS connectivity (if SSL is configured)
+TEST_HTTPS="yes"
+```
+
+#### 2. Secure Configuration File
+
+```bash
+chmod 600 upgrade_pgadmin_config.conf
+```
+
+#### 3. Run Upgrade Script
+
+```bash
+chmod +x upgrade_pgadmin.sh
+sudo ./upgrade_pgadmin.sh
+```
+
+The script will:
+1. Check current pgAdmin version
+2. Verify target version availability
+3. Create comprehensive backup of all configurations
+4. Upgrade pgAdmin package
+5. Verify Apache and WSGI configurations remain intact
+6. Test connectivity to ensure pgAdmin is accessible
+7. Display upgrade summary with version information
+
+### Upgrade Configuration Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `TARGET_VERSION` | Version to upgrade to ("latest" or specific) | latest |
+| `PRESERVE_USER_DATA` | Keep server connections and preferences | yes |
+| `AUTO_ROLLBACK_ON_FAILURE` | Auto-rollback on verification failure | yes |
+| `DRY_RUN` | Test upgrade without making changes | no |
+| `VERIFY_TIMEOUT` | Timeout for connectivity tests (seconds) | 10 |
+| `CUSTOM_DOMAIN` | Custom domain to test (if configured) | (empty) |
+| `TEST_HTTPS` | Test HTTPS connectivity | no |
+| `BACKUP_APACHE_CONFIGS` | Backup Apache configurations | yes |
+| `BACKUP_SSL_CERTS` | Backup SSL certificates | yes |
+| `FORCE_UPGRADE` | Force upgrade even if same version | no |
+
+### What Gets Backed Up
+
+The upgrade script creates a timestamped backup containing:
+
+- **pgAdmin Configuration**: `/etc/pgadmin/` - Complete pgAdmin config directory
+- **User Data**: `/var/lib/pgadmin/` - Server connections, preferences, sessions
+- **Apache WSGI Config**: `/etc/apache2/conf-available/pgadmin4.conf`
+- **VirtualHost Configs**: All Apache site configs referencing pgadmin
+- **Enabled Sites**: List of enabled Apache sites
+- **SSL Certificates**: `/etc/apache2/ssl/` - All SSL certificates
+- **Apache Modules**: List of enabled Apache modules
+- **System State**: Version information and service status
+
+Backup location: `/tmp/pgadmin_upgrade_backup_YYYYMMDD_HHMMSS/`
+
+### Upgrade Scenarios
+
+#### Upgrade to Latest Version
+
+```bash
+# In upgrade_pgadmin_config.conf
+TARGET_VERSION="latest"
+
+sudo ./upgrade_pgadmin.sh
+```
+
+#### Upgrade to Specific Version
+
+```bash
+# In upgrade_pgadmin_config.conf
+TARGET_VERSION="9.13"
+
+sudo ./upgrade_pgadmin.sh
+```
+
+#### Dry Run (Test Without Changes)
+
+```bash
+# In upgrade_pgadmin_config.conf
+DRY_RUN="yes"
+
+sudo ./upgrade_pgadmin.sh
+```
+
+This performs all checks and creates backups but skips the actual package upgrade.
+
+#### Major Version Upgrade
+
+When upgrading across major versions (e.g., 8.x to 9.x):
+
+1. The script will detect the major version change
+2. Display a warning about potential breaking changes
+3. Prompt for confirmation before proceeding
+4. Recommend reviewing release notes
+
+### Rollback Procedure
+
+#### Automatic Rollback
+
+If `AUTO_ROLLBACK_ON_FAILURE="yes"` (default), the script automatically rolls back on any verification failure:
+
+- Downgrades pgAdmin package to previous version
+- Restores all backed-up configurations
+- Restores user data
+- Restarts Apache
+- Verifies rollback success
+
+#### Manual Rollback
+
+If automatic rollback is disabled or you need to rollback later:
+
+```bash
+# List available backups
+ls -lt /tmp/pgadmin_upgrade_backup_*/
+
+# Rollback using specific backup
+sudo ./upgrade_pgadmin.sh --rollback /tmp/pgadmin_upgrade_backup_20260325_143022
+```
+
+### Verification After Upgrade
+
+The script automatically verifies:
+
+- ✅ Apache service is running
+- ✅ pgAdmin WSGI configuration exists
+- ✅ pgAdmin accessible at `http://127.0.0.1/pgadmin4/`
+- ✅ Custom domain accessible (if configured)
+- ✅ HTTPS working (if SSL configured)
+- ✅ User data directory is writable
+- ✅ pgAdmin database file exists
+
+### Post-Upgrade Checklist
+
+After successful upgrade:
+
+1. **Login to pgAdmin** and verify access
+2. **Check server connections** - Ensure saved PostgreSQL servers are intact
+3. **Test database operations** - Connect to databases and run queries
+4. **Verify custom domain** - Test custom domain if configured
+5. **Check SSL certificates** - Ensure HTTPS works if configured
+6. **Review logs** - Check `/var/log/pgadmin_upgrade.log` for details
+
+### Upgrade Troubleshooting
+
+#### Upgrade Fails with "Version Not Found"
+
+```bash
+# Check available versions
+apt-cache policy pgadmin4-web
+
+# Update package lists
+sudo apt-get update
+
+# Try again
+sudo ./upgrade_pgadmin.sh
+```
+
+#### Upgrade Fails with "Already Running Latest Version"
+
+If you want to force reinstall:
+
+```bash
+# In upgrade_pgadmin_config.conf
+FORCE_UPGRADE="yes"
+
+sudo ./upgrade_pgadmin.sh
+```
+
+#### Apache Not Starting After Upgrade
+
+```bash
+# Check Apache configuration
+sudo apache2ctl configtest
+
+# Check Apache error logs
+sudo tail -50 /var/log/apache2/error.log
+
+# Manual rollback
+sudo ./upgrade_pgadmin.sh --rollback /tmp/pgadmin_upgrade_backup_YYYYMMDD_HHMMSS
+```
+
+#### pgAdmin Not Accessible After Upgrade
+
+```bash
+# Verify pgAdmin WSGI config
+ls -la /etc/apache2/conf-enabled/pgadmin4.conf
+
+# Check if it's a symlink to conf-available
+ls -la /etc/apache2/conf-available/pgadmin4.conf
+
+# Re-enable if needed
+sudo a2enconf pgadmin4
+sudo systemctl reload apache2
+
+# Test connectivity
+curl -I http://127.0.0.1/pgadmin4/
+```
+
+#### User Data Missing After Upgrade
+
+If server connections are missing:
+
+```bash
+# Check pgAdmin storage directory
+ls -la /var/lib/pgadmin/storage/
+
+# Verify ownership
+sudo chown -R www-data:www-data /var/lib/pgadmin/
+
+# If needed, restore from backup manually
+sudo cp -r /tmp/pgadmin_upgrade_backup_YYYYMMDD_HHMMSS/var_lib_pgadmin/* /var/lib/pgadmin/
+sudo chown -R www-data:www-data /var/lib/pgadmin/
+sudo systemctl restart apache2
+```
+
+#### SSL Certificate Issues After Upgrade
+
+```bash
+# Verify SSL certificates exist
+ls -la /etc/apache2/ssl/
+
+# Check certificate in VirtualHost config
+sudo grep -r "SSLCertificate" /etc/apache2/sites-available/
+
+# Restore SSL certificates from backup if needed
+sudo cp -r /tmp/pgadmin_upgrade_backup_YYYYMMDD_HHMMSS/apache_ssl /etc/apache2/ssl
+sudo systemctl reload apache2
+```
+
+### Useful Upgrade Commands
+
+```bash
+# Check current pgAdmin version
+dpkg -l | grep pgadmin4-web
+
+# View upgrade log
+sudo cat /var/log/pgadmin_upgrade.log
+
+# List all backups
+ls -lt /tmp/pgadmin_upgrade_backup_*/
+
+# Check upgrade configuration
+cat upgrade_pgadmin_config.conf
+
+# Test pgAdmin connectivity
+curl -I http://127.0.0.1/pgadmin4/
+
+# Check Apache configuration
+sudo apache2ctl -S
+
+# View Apache modules
+apache2ctl -M
+```
+
+### Cleanup Old Backups
+
+After verifying successful upgrade, you can remove old backups:
+
+```bash
+# List backups with sizes
+du -sh /tmp/pgadmin_upgrade_backup_*/
+
+# Remove specific backup
+sudo rm -rf /tmp/pgadmin_upgrade_backup_20260325_143022
+
+# Remove all backups older than 30 days
+find /tmp -name "pgadmin_upgrade_backup_*" -type d -mtime +30 -exec rm -rf {} +
+```
+
 ## Troubleshooting
 
 ### Installation Failed
