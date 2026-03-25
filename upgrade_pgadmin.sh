@@ -150,18 +150,14 @@ check_ubuntu_version() {
 
 check_pgadmin_exists() {
     log_info "Checking if pgAdmin4 is installed..."
-
-    # Use dpkg-query to reliably check that pgadmin4-web is actually installed
-    # and avoid false positives from residual configs or partial states.
-    local pgadmin_status
-    pgadmin_status=$(dpkg-query -W -f='${Status}' pgadmin4-web 2>/dev/null || true)
-
-    if [ "$pgadmin_status" != "install ok installed" ]; then
+    
+    if ! dpkg -l | grep -q "pgadmin4-web"; then
         log_error "pgAdmin4-web is not installed!"
         log_error "This script is for upgrading existing installations only."
         log_error "To install pgAdmin, run: sudo ./install_postgresql_pgadmin.sh"
         exit 1
     fi
+    
     log_success "pgAdmin4-web is installed"
 }
 
@@ -202,6 +198,7 @@ extract_version_from_backup() {
     if [ ! -f "$state_file" ]; then
         log_error "System state file not found in backup: ${state_file}"
         log_error "Cannot determine previous version for package downgrade"
+        log_error "The backup may be incomplete or corrupted"
         return 1
     fi
     
@@ -210,7 +207,9 @@ extract_version_from_backup() {
     
     if [ -z "$OLD_VERSION" ]; then
         log_error "Unable to extract old version from backup"
-        log_error "Manual package downgrade may be required"
+        log_error "The system_state.txt file exists but doesn't contain version information"
+        log_info "Backup file location: ${state_file}"
+        log_info "You can check the file manually: cat ${state_file}"
         return 1
     fi
     
@@ -357,13 +356,7 @@ backup_configurations() {
     log_info "Creating comprehensive backup of configurations..."
     
     BACKUP_DIR="${BACKUP_BASE_DIR}_$(date +%Y%m%d_%H%M%S)"
-    # Create backup directory with restrictive permissions to protect sensitive pgAdmin data
-    local original_umask
-    original_umask=$(umask)
-    umask 077
     mkdir -p "${BACKUP_DIR}"
-    umask "${original_umask}"
-    chmod 700 "${BACKUP_DIR}"
     
     log_info "Backup directory: ${BACKUP_DIR}"
     
@@ -405,9 +398,9 @@ backup_configurations() {
         local vhost_count=0
         for vhost in /etc/apache2/sites-available/*.conf; do
             if [ -f "$vhost" ] && grep -q "pgadmin" "$vhost"; then
-                cp "$vhost" "${BACKUP_DIR}/apache/$(basename "$vhost")"
+                cp "$vhost" "${BACKUP_DIR}/apache/$(basename $vhost)"
                 vhost_count=$((vhost_count + 1))
-                log_info "Backed up: $(basename "$vhost")"
+                log_info "Backed up: $(basename $vhost)"
             fi
         done
         
@@ -799,11 +792,9 @@ main() {
         fi
     fi
     
-    # Always enforce root/sudo privileges
-    check_root
-    
-    # Pre-flight checks (can be partially skipped)
+    # Pre-flight checks
     if [ "${SKIP_PREFLIGHT_CHECKS:-no}" != "yes" ]; then
+        check_root
         check_ubuntu_version
         check_pgadmin_exists
         check_apache_running
@@ -811,9 +802,6 @@ main() {
         check_version_availability
     else
         log_warning "Skipping pre-flight checks as requested"
-        # Still determine versions to ensure upgrade logic has required data
-        get_current_version
-        check_version_availability
     fi
     
     # Create backup
@@ -848,7 +836,6 @@ if [ $# -gt 0 ]; then
     case "$1" in
         --rollback)
             log_info "Manual rollback requested"
-            check_root
             if [ -z "${2:-}" ]; then
                 log_error "Please specify backup directory"
                 log_error "Usage: sudo ./upgrade_pgadmin.sh --rollback /path/to/backup"
@@ -857,33 +844,43 @@ if [ $# -gt 0 ]; then
             BACKUP_DIR="$2"
             load_config
             
-            # Migrate to configured log file
+            # Migrate to configured log file (after config is loaded)
             if [ -n "${CONFIGURED_LOG_FILE:-}" ]; then
-                temp_log="${LOG_FILE}"
-                configured_log="${CONFIGURED_LOG_FILE}"
-                log_dir="$(dirname "${configured_log}")"
+                local temp_log="${LOG_FILE}"
+                local configured_log="${CONFIGURED_LOG_FILE}"
+                local log_dir="$(dirname "${configured_log}")"
                 
+                # Ensure log directory exists and is writable
                 if [ ! -d "${log_dir}" ]; then
-                    mkdir -p "${log_dir}" 2>/dev/null || true
+                    if ! mkdir -p "${log_dir}" 2>/dev/null; then
+                        log_warning "Cannot create log directory: ${log_dir}"
+                        log_warning "Continuing with temporary log file: ${temp_log}"
+                    fi
                 fi
                 
-                if [ -d "${log_dir}" ] && touch "${configured_log}" 2>/dev/null; then
-                    [ -f "${temp_log}" ] && cat "${temp_log}" > "${configured_log}" 2>/dev/null || true
-                    LOG_FILE="${configured_log}"
-                else
+                # Test if we can write to the configured log location
+                if [ ! -d "${log_dir}" ] || ! touch "${configured_log}" 2>/dev/null; then
                     log_warning "Cannot write to configured log file: ${configured_log}"
-                    LOG_FILE="${temp_log}"
                     log_warning "Continuing with temporary log file: ${temp_log}"
+                else
+                    # Copy temp log to configured location
+                    if [ -f "${temp_log}" ]; then
+                        cat "${temp_log}" > "${configured_log}" 2>/dev/null || true
+                    fi
+                    LOG_FILE="${configured_log}"
+                    log_info "Log file set to: ${LOG_FILE}"
                 fi
             fi
             
             # Extract OLD_VERSION from backup before rollback
-            if extract_version_from_backup && [ -n "${OLD_VERSION}" ]; then
-                # Mark package as "upgraded" so rollback_upgrade() will attempt the downgrade
-                PACKAGE_UPGRADED=true
-            else
+            if ! extract_version_from_backup; then
                 log_warning "Could not extract version from backup"
                 log_warning "Package downgrade will be skipped, but configurations will be restored"
+                echo ""
+                log_info "To manually downgrade the package after rollback:"
+                log_info "  1. Check available versions: apt-cache policy pgadmin4-web"
+                log_info "  2. Downgrade: sudo apt-get install -y --allow-downgrades pgadmin4-web=<version>"
+                echo ""
             fi
             
             rollback_upgrade
