@@ -280,12 +280,16 @@ check_existing_pgvector() {
     log_info "Checking for existing pgvector installation..."
     
     # Check if package is installed
+    # Temporarily disable pipefail to avoid SIGPIPE from dpkg when grep exits early
+    set +o pipefail
     if dpkg -l | grep -q "postgresql-.*-pgvector"; then
         local installed_version=$(dpkg -l | grep "postgresql-.*-pgvector" | awk '{print $3}')
+        set -o pipefail
         log_warning "pgvector package is already installed (version: ${installed_version})"
         log_warning "Installation will proceed and may upgrade the package"
         return 0
     fi
+    set -o pipefail
     
     # Check if extension exists in any database
     local existing_dbs=$(sudo -u postgres psql -t -c "SELECT datname FROM pg_database WHERE datname NOT IN ('template0') AND oid IN (SELECT extnamespace FROM pg_extension WHERE extname='vector');" 2>/dev/null | xargs)
@@ -403,12 +407,16 @@ verify_pgvector_installation() {
     log_info "Verifying pgvector installation..."
     
     # Check package installation
+    # Temporarily disable pipefail to avoid SIGPIPE from dpkg when grep exits early
+    set +o pipefail
     if ! dpkg -l | grep -q "postgresql-.*-pgvector"; then
+        set -o pipefail
         log_error "pgvector package not found in system packages"
         return 1
     fi
     
     local installed_version=$(dpkg -l | grep "postgresql-.*-pgvector" | awk '{print $3}')
+    set -o pipefail
     log_success "Package verification: postgresql-pgvector ${installed_version} is installed"
     
     # Skip tests if not requested
@@ -553,7 +561,9 @@ uninstall_pgvector() {
     
     # Find all databases with vector extension
     log_info "Detecting databases with pgvector extension..."
+    set +o pipefail
     local dbs_with_vector=$(sudo -u postgres psql -t -c "SELECT d.datname FROM pg_database d JOIN pg_extension e ON d.oid = e.extnamespace WHERE e.extname='vector' AND d.datname NOT IN ('template0');" 2>/dev/null | xargs)
+    set -o pipefail
     
     if [ -n "$dbs_with_vector" ]; then
         log_info "Found pgvector in databases: ${dbs_with_vector}"
@@ -572,7 +582,9 @@ uninstall_pgvector() {
     fi
     
     # Remove package
+    set +o pipefail
     if dpkg -l | grep -q "postgresql-.*-pgvector"; then
+        set -o pipefail
         log_info "Removing pgvector package..."
         if apt-get remove -y postgresql-*-pgvector; then
             log_success "pgvector package removed"
