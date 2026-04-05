@@ -6,12 +6,14 @@ Automated installation script for PostgreSQL database server and pgAdmin4 web in
 
 - ✅ Automated PostgreSQL installation and configuration
 - ✅ pgAdmin4 Web interface setup
+- ✅ **pgVector extension for AI/ML vector similarity search**
 - ✅ Custom database and user creation
 - ✅ Optional remote access configuration
 - ✅ **Intelligent performance tuning with auto-detection**
 - ✅ **SSD/HDD disk type optimization**
 - ✅ **Apache reverse proxy with custom domain support (optional)**
 - ✅ **Self-signed SSL certificate generation for HTTPS (optional)**
+- ✅ **pgAdmin upgrade utility with automatic rollback**
 - ✅ Comprehensive error handling with rollback capability
 - ✅ Detailed logging for troubleshooting
 - ✅ Pre-installation checks to prevent conflicts
@@ -1064,6 +1066,377 @@ sudo rm -rf /tmp/pgadmin_upgrade_backup_YYYYMMDD_HHMMSS
 sudo find /tmp -name "pgadmin_upgrade_backup_*" -type d -mtime +30 -exec rm -rf {} +
 ```
 
+## Installing pgVector Extension
+
+The `install_pgvector.sh` script provides an automated way to install and configure the [pgvector](https://github.com/pgvector/pgvector) extension for PostgreSQL, enabling vector similarity search capabilities for AI/ML applications, semantic search, and recommendation systems.
+
+### What is pgVector?
+
+pgvector is a PostgreSQL extension that adds support for:
+- **Vector data types**: Store embeddings from machine learning models
+- **Vector similarity search**: Find similar items using L2 distance, inner product, or cosine similarity
+- **Indexing**: Fast approximate nearest neighbor search using IVFFlat or HNSW indexes
+- **Integration**: Works seamlessly with popular ML frameworks (OpenAI, Hugging Face, etc.)
+
+### Features
+
+- ✅ **Automated Installation**: Installs pgvector package for your PostgreSQL version
+- ✅ **Selective Database Configuration**: Enable pgvector in specific databases
+- ✅ **Template Database Support**: Optionally enable for all future databases
+- ✅ **Comprehensive Verification**: Tests vector operations, similarity search, and indexing
+- ✅ **Automatic Rollback**: Reverts changes on installation failure
+- ✅ **Easy Uninstall**: Complete removal with `--uninstall` flag
+- ✅ **Version Auto-Detection**: Automatically detects PostgreSQL version
+
+### Prerequisites
+
+- ✅ PostgreSQL must be already installed and running
+- ✅ Root or sudo access
+- ✅ Internet connection for downloading packages
+- ✅ Ubuntu 24.04 LTS (recommended)
+
+### Quick Installation Guide
+
+#### 1. Configure pgVector Settings
+
+Edit the `configs/install_pgvector_config.conf` file:
+
+```bash
+nano configs/install_pgvector_config.conf
+```
+
+**Important settings:**
+
+```bash
+# PostgreSQL version (leave empty for auto-detect)
+POSTGRES_VERSION=""
+
+# Databases to enable pgvector in (comma-separated)
+TARGET_DATABASES="postgres,myappdb"
+
+# Enable in template1 for all future databases
+ENABLE_IN_TEMPLATE1="no"
+
+# Run verification tests after installation
+RUN_VERIFICATION_TESTS="yes"
+```
+
+#### 2. Secure Configuration File
+
+```bash
+chmod 600 configs/install_pgvector_config.conf
+```
+
+#### 3. Run Installation Script
+
+```bash
+chmod +x install_pgvector.sh
+sudo ./install_pgvector.sh
+```
+
+The script will:
+- Check that PostgreSQL is installed and running
+- Auto-detect PostgreSQL version
+- Install the appropriate pgvector package
+- Enable the extension in specified databases
+- Run comprehensive verification tests
+- Display success information and usage examples
+
+### Configuration Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `POSTGRES_VERSION` | PostgreSQL version to target | (auto-detect) |
+| `TARGET_DATABASES` | Comma-separated list of databases | postgres |
+| `ENABLE_IN_TEMPLATE1` | Enable for all future databases | no |
+| `RUN_VERIFICATION_TESTS` | Run tests after installation | yes |
+| `TEST_VECTOR_DIMENSION` | Dimension for test vectors | 3 |
+| `LOG_FILE` | Log file location | /var/log/pgvector_install_*.log |
+| `VERBOSE_LOGGING` | Show detailed PostgreSQL output | no |
+
+### Using pgVector
+
+After installation, you can use vector operations in your databases:
+
+#### Create Table with Vector Column
+
+```sql
+-- Connect to your database
+\c myappdb
+
+-- Create table with vector column (e.g., 1536 dimensions for OpenAI embeddings)
+CREATE TABLE documents (
+    id bigserial PRIMARY KEY,
+    content text,
+    embedding vector(1536)
+);
+```
+
+#### Insert Vectors
+
+```sql
+-- Insert sample vectors
+INSERT INTO documents (content, embedding) VALUES
+    ('Document 1', '[0.1, 0.2, 0.3, ...]'),  -- 1536 dimensions
+    ('Document 2', '[0.4, 0.5, 0.6, ...]');
+```
+
+#### Similarity Search
+
+```sql
+-- Find most similar documents using L2 distance
+SELECT content, embedding <-> '[0.1, 0.2, 0.3, ...]' AS distance
+FROM documents
+ORDER BY distance
+LIMIT 5;
+
+-- Using cosine distance (recommended for normalized vectors)
+SELECT content, embedding <=> '[0.1, 0.2, 0.3, ...]' AS cosine_distance
+FROM documents
+ORDER BY cosine_distance
+LIMIT 5;
+
+-- Using inner product (for maximum inner product search)
+SELECT content, (embedding <#> '[0.1, 0.2, 0.3, ...]') * -1 AS inner_product
+FROM documents
+ORDER BY embedding <#> '[0.1, 0.2, 0.3, ...]'
+LIMIT 5;
+```
+
+#### Create Index for Fast Search
+
+```sql
+-- Create HNSW index (better recall, requires pgvector >= 0.5.0)
+CREATE INDEX ON documents USING hnsw (embedding vector_cosine_ops);
+
+-- Or IVFFlat index (faster build time)
+CREATE INDEX ON documents USING ivfflat (embedding vector_l2_ops) WITH (lists = 100);
+```
+
+### Distance Operators
+
+| Operator | Description | Order By | Index Operator |
+|----------|-------------|----------|----------------|
+| `<->` | L2 distance (Euclidean) | ASC | `vector_l2_ops` |
+| `<#>` | Inner product (negative) | ASC | `vector_ip_ops` |
+| `<=>` | Cosine distance | ASC | `vector_cosine_ops` |
+
+### Verification Tests
+
+When `RUN_VERIFICATION_TESTS="yes"`, the script performs:
+
+1. **Package Check**: Verifies pgvector package installation
+2. **Extension Check**: Confirms extension is enabled
+3. **Vector Operations**: Tests creating vectors and basic operations
+4. **L2 Distance**: Tests Euclidean distance calculations
+5. **Inner Product**: Tests cosine similarity calculations
+6. **IVFFlat Index**: Tests approximate nearest neighbor indexing
+7. **HNSW Index**: Tests hierarchical navigable small world indexing (if available)
+
+All tests are performed on temporary tables that are automatically cleaned up.
+
+### Uninstalling pgVector
+
+To completely remove pgvector extension:
+
+```bash
+# Uninstall with confirmation
+sudo ./install_pgvector.sh --uninstall
+
+# Uninstall without confirmation
+sudo ./install_pgvector.sh --uninstall --force
+```
+
+The uninstall process:
+- Detects all databases with pgvector extension
+- Drops the extension from each database (with CASCADE)
+- Removes the pgvector package
+- Cleans up dependencies
+
+### Command-Line Options
+
+```bash
+# Install pgvector (default)
+sudo ./install_pgvector.sh
+
+# Uninstall pgvector with confirmation
+sudo ./install_pgvector.sh --uninstall
+
+# Uninstall without confirmation prompt
+sudo ./install_pgvector.sh --uninstall --force
+
+# Display help information
+sudo ./install_pgvector.sh --help
+```
+
+### Common Use Cases
+
+#### OpenAI Embeddings
+
+```sql
+-- Table for OpenAI ada-002 embeddings (1536 dimensions)
+CREATE TABLE openai_embeddings (
+    id bigserial PRIMARY KEY,
+    text text,
+    embedding vector(1536)
+);
+
+-- Create index for fast similarity search
+CREATE INDEX ON openai_embeddings USING hnsw (embedding vector_cosine_ops);
+
+-- Find similar texts
+SELECT text, embedding <=> $1 AS similarity
+FROM openai_embeddings
+ORDER BY similarity
+LIMIT 10;
+```
+
+#### Sentence Transformers / Hugging Face
+
+```sql
+-- Table for sentence-transformers embeddings (384 dimensions for all-MiniLM-L6-v2)
+CREATE TABLE sentence_embeddings (
+    id bigserial PRIMARY KEY,
+    sentence text,
+    embedding vector(384)
+);
+
+-- Create index
+CREATE INDEX ON sentence_embeddings USING hnsw (embedding vector_cosine_ops);
+```
+
+#### Product Recommendations
+
+```sql
+-- Table for product feature vectors
+CREATE TABLE products (
+    id bigserial PRIMARY KEY,
+    name text,
+    description text,
+    feature_vector vector(128)
+);
+
+-- Find similar products
+SELECT p.name, p.feature_vector <-> $1 AS distance
+FROM products p
+ORDER BY distance
+LIMIT 5;
+```
+
+### Integration Examples
+
+#### Python with psycopg2
+
+```python
+import psycopg2
+import numpy as np
+
+# Connect to database
+conn = psycopg2.connect("dbname=myappdb user=postgres")
+cur = conn.cursor()
+
+# Insert vector
+embedding = np.random.rand(1536).tolist()
+cur.execute(
+    "INSERT INTO documents (content, embedding) VALUES (%s, %s)",
+    ("Sample document", embedding)
+)
+
+# Search similar vectors
+query_vector = np.random.rand(1536).tolist()
+cur.execute(
+    "SELECT content FROM documents ORDER BY embedding <=> %s LIMIT 5",
+    (query_vector,)
+)
+results = cur.fetchall()
+```
+
+#### Python with SQLAlchemy
+
+```python
+from sqlalchemy import create_engine, text
+from pgvector.sqlalchemy import Vector
+
+# Create engine
+engine = create_engine('postgresql://postgres@localhost/myappdb')
+
+# Execute similarity search
+with engine.connect() as conn:
+    result = conn.execute(
+        text("SELECT content FROM documents ORDER BY embedding <=> :embedding LIMIT 5"),
+        {"embedding": embedding}
+    )
+```
+
+### Troubleshooting pgVector
+
+#### Extension Not Found
+
+If you see "extension 'vector' is not available":
+
+```bash
+# Check if package is installed
+dpkg -l | grep pgvector
+
+# Check PostgreSQL version
+sudo -u postgres psql -c "SHOW server_version;"
+
+# Reinstall for correct version
+sudo apt-get install postgresql-16-pgvector  # Replace 16 with your version
+```
+
+#### Index Creation Fails
+
+For IVFFlat indexes, you need enough data:
+
+```sql
+-- IVFFlat requires at least 'lists' number of rows
+-- For lists=100, you need at least 100 rows
+
+-- Alternative: Use HNSW index (no minimum data requirement)
+CREATE INDEX ON table USING hnsw (embedding vector_cosine_ops);
+```
+
+#### Version Compatibility
+
+- **pgvector >= 0.5.0**: HNSW index support
+- **pgvector >= 0.4.0**: Cosine distance operator
+- **pgvector >= 0.1.0**: Basic vector operations
+
+Check your version:
+
+```sql
+SELECT extversion FROM pg_extension WHERE extname = 'vector';
+```
+
+### Performance Tips
+
+1. **Choose the Right Index**:
+   - HNSW: Better recall, good for most use cases
+   - IVFFlat: Faster build time, good for large datasets
+
+2. **Normalize Vectors**: Use cosine distance for normalized vectors
+
+3. **Tune Index Parameters**:
+   ```sql
+   -- IVFFlat: lists = rows / 1000 (for rows > 1M)
+   CREATE INDEX ON table USING ivfflat (embedding vector_cosine_ops) WITH (lists = 1000);
+   
+   -- HNSW: m (connections per layer), ef_construction (build quality)
+   CREATE INDEX ON table USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);
+   ```
+
+4. **Use Connection Pooling**: For high-concurrency applications
+
+5. **Batch Operations**: Insert/update vectors in batches
+
+### Resources
+
+- **pgvector GitHub**: https://github.com/pgvector/pgvector
+- **Documentation**: https://github.com/pgvector/pgvector#readme
+- **Performance Guide**: https://github.com/pgvector/pgvector#performance
+- **Language Libraries**: https://github.com/pgvector/pgvector#languages
+
 ## Troubleshooting
 
 ### Installation Failed
@@ -1220,10 +1593,15 @@ gunzip -c backup.sql.gz | sudo -u postgres psql dbname
 
 ```
 Install_PostgreSQL_with_pgAdmin/
-├── install_config.conf                 # Main installation configuration
 ├── install_postgresql_pgadmin.sh       # PostgreSQL & pgAdmin installation script
-├── install_config_proxy.conf           # Reverse proxy configuration
+├── install_pgvector.sh                 # pgVector extension installation script
 ├── install_apache_reverse_proxy.sh     # Apache reverse proxy setup script
+├── upgrade_pgadmin.sh                  # pgAdmin upgrade utility script
+├── configs/
+│   ├── install_config.conf             # Main installation configuration
+│   ├── install_pgvector_config.conf    # pgVector installation configuration
+│   ├── install_config_proxy.conf       # Reverse proxy configuration
+│   └── upgrade_pgadmin_config.conf     # pgAdmin upgrade configuration
 ├── README.md                           # This file
 └── .gitignore                          # Git ignore file
 ```

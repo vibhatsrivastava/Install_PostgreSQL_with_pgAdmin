@@ -1,11 +1,13 @@
 # Configuration file with sensitive data
 # install_config.conf
 # install_config_proxy.conf
+# install_pgvector_config.conf
 
 # Log files
 *.log
 /var/log/postgresql_pgadmin_install_*.log
 /var/log/apache_reverse_proxy_install_*.log
+/var/log/pgvector_install_*.log
 
 # Backup directories
 /tmp/postgresql_pgadmin_backup_*/

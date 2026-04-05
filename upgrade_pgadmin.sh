@@ -16,7 +16,7 @@
 #   - Ubuntu 24.04 LTS (recommended)
 #   - Root/sudo privileges
 #   - Existing pgAdmin4 installation
-#   - Configured upgrade_pgadmin_config.conf file
+#   - Configured configs/upgrade_pgadmin_config.conf file
 ###############################################################################
 
 set -e  # Exit on error
@@ -28,7 +28,7 @@ set -o pipefail  # Exit on pipe failure
 # ====================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG_FILE="${SCRIPT_DIR}/upgrade_pgadmin_config.conf"
+CONFIG_FILE="${SCRIPT_DIR}/configs/upgrade_pgadmin_config.conf"
 BACKUP_DIR=""
 UPGRADE_STARTED=false
 PACKAGE_UPGRADED=false
@@ -913,7 +913,7 @@ if [ $# -gt 0 ]; then
             echo "  --help, -h               Show this help message"
             echo ""
             echo "Configuration:"
-            echo "  Edit upgrade_pgadmin_config.conf before running"
+            echo "  Edit configs/upgrade_pgadmin_config.conf before running"
             echo ""
             exit 0
             ;;

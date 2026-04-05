@@ -42,7 +42,7 @@ NC='\033[0m' # No Color
 # Global Variables
 # =============================================================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG_FILE="${SCRIPT_DIR}/install_config_proxy.conf"
+CONFIG_FILE="${SCRIPT_DIR}/configs/install_config_proxy.conf"
 TEMP_LOG_FILE="/tmp/apache_proxy_install_$$.log"
 
 # State tracking flags for rollback

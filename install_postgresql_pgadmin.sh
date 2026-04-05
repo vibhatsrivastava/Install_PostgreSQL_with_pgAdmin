@@ -14,7 +14,7 @@
 # Requirements:
 #   - Ubuntu 24.04 LTS
 #   - Root/sudo privileges
-#   - Configured install_config.conf file
+#   - Configured configs/install_config.conf file
 ###############################################################################
 
 set -e  # Exit on error
@@ -26,7 +26,7 @@ set -o pipefail  # Exit on pipe failure
 # ====================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG_FILE="${SCRIPT_DIR}/install_config.conf"
+CONFIG_FILE="${SCRIPT_DIR}/configs/install_config.conf"
 BACKUP_DIR="/tmp/postgresql_pgadmin_backup_$(date +%Y%m%d_%H%M%S)"
 INSTALLATION_STARTED=false
 POSTGRES_INSTALLED=false
