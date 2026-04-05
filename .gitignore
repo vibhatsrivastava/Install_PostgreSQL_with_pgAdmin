@@ -2,16 +2,20 @@
 # install_config.conf
 # install_config_proxy.conf
 # install_pgvector_config.conf
+# install_cdc_config.conf
 
 # Log files
 *.log
 /var/log/postgresql_pgadmin_install_*.log
 /var/log/apache_reverse_proxy_install_*.log
 /var/log/pgvector_install_*.log
+/var/log/cdc_replication_install_*.log
+/var/log/ddl_replication.log
 
 # Backup directories
 /tmp/postgresql_pgadmin_backup_*/
 /tmp/apache_proxy_backup_*/
+/tmp/postgresql_cdc_backup_*/
 
 # PostgreSQL backup files
 *.sql
