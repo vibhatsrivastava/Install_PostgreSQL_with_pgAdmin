@@ -38,6 +38,10 @@ The CDC (Change Data Capture) installation script sets up real-time data replica
    - Column for vectorization: `error_message` (text column)
 
 3. **Ollama Running with Model**
+   
+   Ollama can run either locally on the PostgreSQL server or on a remote server.
+   
+   **For Local Ollama (default):**
    ```bash
    # Check Ollama service
    systemctl status ollama
@@ -49,7 +53,27 @@ The CDC (Change Data Capture) installation script sets up real-time data replica
    
    # Verify model is available
    ollama list | grep nomic-embed-text
+   
+   # Test API endpoint
+   curl http://localhost:11434/api/tags
    ```
+   
+   **For Remote Ollama (e.g., http://10.0.0.15:11434):**
+   ```bash
+   # Test connectivity to remote Ollama
+   curl http://10.0.0.15:11434/api/tags
+   
+   # Verify the embedding model is available on remote server
+   curl http://10.0.0.15:11434/api/tags | grep -i nomic-embed-text
+   
+   # Test embedding generation
+   curl http://10.0.0.15:11434/api/embeddings -d '{
+     "model": "nomic-embed-text",
+     "prompt": "test"
+   }'
+   ```
+   
+   **Important:** If using remote Ollama, ensure the PostgreSQL server can reach the Ollama server on port 11434.
 
 4. **pgVector Extension Available**
    - Should be installed if you ran `install_pgvector.sh`
@@ -70,7 +94,9 @@ nano configs/install_cdc_config.conf
 - `SOURCE_DATABASE` - Name of your source database (default: ansible_execution_results)
 - `SOURCE_TABLE` - Name of table to replicate (default: failed_jobs)
 - `TEXT_COLUMN_TO_VECTORIZE` - Column name containing text for embeddings (default: error_message)
-- `OLLAMA_API_URL` - Ollama API endpoint (default: http://localhost:11434)
+- `OLLAMA_API_URL` - Ollama API endpoint
+  - Local: `http://localhost:11434` (default)
+  - Remote: `http://<ollama-server-ip>:11434` (e.g., `http://10.0.0.15:11434`)
 
 **Optional Settings:**
 - Feature toggles (ENABLE_DDL_REPLICATION, ENABLE_EMBEDDING_GENERATION, etc.)
@@ -99,11 +125,17 @@ sudo -u postgres psql -l | grep ansible_execution_results
 # Source table exists with primary key
 sudo -u postgres psql -d ansible_execution_results -c "\d failed_jobs"
 
-# Ollama is accessible
+# Ollama is accessible (adjust URL if using remote Ollama)
+# For local Ollama:
 curl http://localhost:11434/api/tags
+# For remote Ollama (e.g., http://10.0.0.15:11434):
+# curl http://10.0.0.15:11434/api/tags
 
-# nomic-embed-text model is available
+# Embedding model is available (adjust URL if using remote Ollama)
+# For local Ollama:
 ollama list | grep nomic-embed-text
+# For remote Ollama:
+# curl http://10.0.0.15:11434/api/tags | grep -i nomic-embed-text
 ```
 
 ### Step 4: Run the Installation
@@ -306,8 +338,11 @@ ALTER SUBSCRIPTION ansible_failed_jobs_sub ENABLE;"
 ### Embeddings Not Generating
 
 ```bash
-# Check Ollama service
+# Check Ollama service connectivity (adjust URL based on your config)
+# For local Ollama:
 curl http://localhost:11434/api/tags
+# For remote Ollama (replace with your OLLAMA_API_URL):
+# curl http://10.0.0.15:11434/api/tags
 
 # Test embedding function manually
 sudo -u postgres psql -d ansible_failed_jobs_vectordb -c "
