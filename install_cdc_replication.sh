@@ -333,7 +333,7 @@ check_ollama() {
     
     # Check if model is available
     log_info "Checking if model '${OLLAMA_MODEL}' is available..."
-    if ! curl -s "${OLLAMA_API_URL}/api/tags" | grep -q "\"${OLLAMA_MODEL}\""; then
+    if ! curl -s "${OLLAMA_API_URL}/api/tags" | grep -q "\"${OLLAMA_MODEL}[:\"]"; then
         log_error "Model '${OLLAMA_MODEL}' is not available in Ollama"
         log_info "Please pull the model: ollama pull ${OLLAMA_MODEL}"
         exit 1
@@ -443,6 +443,14 @@ create_target_database() {
         log_warning "Database '${TARGET_DATABASE}' already exists"
         read -p "Do you want to drop and recreate it? (yes/no): " -r
         if [[ $REPLY =~ ^[Yy][Ee][Ss]$ ]]; then
+            log_info "Terminating active connections to ${TARGET_DATABASE}..."
+            sudo -u postgres psql -c "
+                SELECT pg_terminate_backend(pid) 
+                FROM pg_stat_activity 
+                WHERE datname = '${TARGET_DATABASE}' 
+                  AND pid != pg_backend_pid();" > /dev/null 2>&1 || true
+            
+            log_info "Dropping existing database..."
             sudo -u postgres psql -c "DROP DATABASE ${TARGET_DATABASE};"
             log_info "Dropped existing database"
         else
@@ -542,6 +550,30 @@ create_publication() {
     log_success "Publication created: ${PUBLICATION_NAME}"
 }
 
+terminate_idle_transactions() {
+    log_info "Terminating all connections to source database..."
+    
+    # Disallow new connections temporarily
+    sudo -u postgres psql -c \
+        "UPDATE pg_database SET datallowconn = false WHERE datname = '${SOURCE_DATABASE}';" > /dev/null 2>&1 || true
+    
+    # Terminate ALL connections to the source database (except our own)
+    sudo -u postgres psql -c \
+        "SELECT pg_terminate_backend(pid) 
+         FROM pg_stat_activity 
+         WHERE datname = '${SOURCE_DATABASE}' 
+           AND pid != pg_backend_pid();" > /dev/null 2>&1 || true
+    
+    # Allow connections again
+    sudo -u postgres psql -c \
+        "UPDATE pg_database SET datallowconn = true WHERE datname = '${SOURCE_DATABASE}';" > /dev/null 2>&1 || true
+    
+    # Give PostgreSQL a moment to clean up
+    sleep 2
+    
+    log_success "All connections to source database terminated"
+}
+
 create_subscription() {
     log_info "Creating subscription in target database..."
     
@@ -554,14 +586,73 @@ create_subscription() {
         sudo -u postgres psql -d "${TARGET_DATABASE}" -c "DROP SUBSCRIPTION ${SUBSCRIPTION_NAME};"
     fi
     
+    # Drop any existing replication slot with the same name
+    log_info "Checking for existing replication slot..."
+    local slot_exists=$(sudo -u postgres psql -d "${SOURCE_DATABASE}" -t -c \
+        "SELECT COUNT(*) FROM pg_replication_slots WHERE slot_name='${SUBSCRIPTION_NAME}';")
+    
+    if [ "$slot_exists" -gt 0 ]; then
+        log_warning "Replication slot '${SUBSCRIPTION_NAME}' already exists, dropping..."
+        sudo -u postgres psql -d "${SOURCE_DATABASE}" -c \
+            "SELECT pg_drop_replication_slot('${SUBSCRIPTION_NAME}');" || true
+    fi
+    
+    # Terminate any idle transactions that might block slot creation
+    terminate_idle_transactions
+    
+    # Force vacuum and checkpoint to clear old transaction snapshots
+    log_info "Running VACUUM FREEZE to clear old transaction snapshots..."
+    sudo -u postgres psql -d "${SOURCE_DATABASE}" -c "VACUUM FREEZE;" > /dev/null 2>&1 || true
+    sudo -u postgres psql -c "CHECKPOINT;" > /dev/null 2>&1 || true
+    sleep 2
+    
+    # Create replication slot manually first (this gives better error handling)
+    log_info "Creating replication slot manually..."
+    local slot_created=false
+    local retry_count=0
+    local max_retries=3
+    
+    while [ $retry_count -lt $max_retries ] && [ "$slot_created" = false ]; do
+        if timeout 30 sudo -u postgres psql -d "${SOURCE_DATABASE}" -c \
+            "SELECT pg_create_logical_replication_slot('${SUBSCRIPTION_NAME}', 'pgoutput');" > /dev/null 2>&1; then
+            slot_created=true
+            log_success "Replication slot created"
+        else
+            retry_count=$((retry_count + 1))
+            if [ $retry_count -lt $max_retries ]; then
+                log_warning "Slot creation attempt $retry_count failed, retrying after vacuum..."
+                sudo -u postgres psql -d "${SOURCE_DATABASE}" -c "VACUUM FREEZE;" > /dev/null 2>&1 || true
+                sleep 5
+            fi
+        fi
+    done
+    
+    if [ "$slot_created" = false ]; then
+        log_error "Failed to create replication slot after $max_retries attempts"
+        log_info "This indicates persistent old transactions blocking slot creation"
+        log_info "Manual intervention required: Check for long-running transactions or restart PostgreSQL"
+        exit 1
+    fi
+    
     # Create connection string
     local conn_str="host=localhost port=5432 dbname=${SOURCE_DATABASE} user=postgres password=${POSTGRES_PASSWORD}"
     
-    sudo -u postgres psql -d "${TARGET_DATABASE}" -c \
+    # Create subscription WITHOUT creating slot (we already created it)
+    log_info "Creating subscription (using existing slot)..."
+    local create_sub_result=0
+    timeout 60 sudo -u postgres psql -d "${TARGET_DATABASE}" -c \
         "CREATE SUBSCRIPTION ${SUBSCRIPTION_NAME} 
          CONNECTION '${conn_str}' 
          PUBLICATION ${PUBLICATION_NAME} 
-         WITH (copy_data = true, create_slot = true, enabled = true);"
+         WITH (copy_data = true, create_slot = false, enabled = true);" || create_sub_result=$?
+    
+    if [ $create_sub_result -eq 124 ]; then
+        log_error "Subscription creation timed out after 60 seconds"
+        exit 1
+    elif [ $create_sub_result -ne 0 ]; then
+        log_error "Failed to create subscription"
+        exit 1
+    fi
     
     REPLICATION_CONFIGURED=true
     log_success "Subscription created: ${SUBSCRIPTION_NAME}"
@@ -836,7 +927,9 @@ install_plpython3u() {
     
     # Install Python requests library
     log_info "Installing Python requests library..."
-    pip3 install --quiet requests
+    # Ubuntu 24.04 requires --break-system-packages for pip
+    pip3 install --quiet --break-system-packages requests 2>&1 || \
+        apt-get install -y python3-requests > /dev/null 2>&1 || true
     log_success "Python requests library installed"
 }
 
@@ -847,41 +940,44 @@ create_embedding_function() {
     sudo -u postgres psql -d "${TARGET_DATABASE}" -c \
         "ALTER DATABASE ${TARGET_DATABASE} SET app.ollama_api_url = '${OLLAMA_API_URL}';"
     
-    local embedding_function="
-    CREATE OR REPLACE FUNCTION generate_embedding(text_input TEXT)
-    RETURNS vector(${EMBEDDING_DIMENSION}) AS \$\$
-        import requests
-        import json
-        
-        if not text_input:
-            return None
-            
-        # Truncate text if too long
-        max_length = ${MAX_TEXT_LENGTH}
-        if len(text_input) > max_length:
-            text_input = text_input[:max_length]
-        
-        ollama_url = plpy.execute(\"SHOW app.ollama_api_url\")[0][\"app.ollama_api_url\"]
-        endpoint = f\"{ollama_url}/api/embeddings\"
-        
-        payload = {
-            \"model\": \"${OLLAMA_MODEL}\",
-            \"prompt\": text_input
-        }
-        
-        try:
-            response = requests.post(endpoint, json=payload, timeout=30)
-            if response.status_code == 200:
-                return response.json()['embedding']
-            else:
-                plpy.warning(f\"Ollama API error: {response.status_code} - {response.text}\")
-                return None
-        except Exception as e:
-            plpy.warning(f\"Failed to generate embedding: {str(e)}\")
-            return None
-    \$\$ LANGUAGE plpython3u;"
-    
-    sudo -u postgres psql -d "${TARGET_DATABASE}" -c "$embedding_function"
+    # Create embedding function using heredoc
+    sudo -u postgres psql -d "${TARGET_DATABASE}" << EOF
+CREATE OR REPLACE FUNCTION generate_embedding(TEXT)
+RETURNS vector(${EMBEDDING_DIMENSION}) AS \$\$
+import requests
+import json
+
+# Access parameter via args array (PL/Python compatibility)
+input_text = args[0] if args and len(args) > 0 else None
+
+if input_text is None or len(input_text.strip()) == 0:
+    return None
+
+# Truncate text if too long
+max_len = ${MAX_TEXT_LENGTH}
+if len(input_text) > max_len:
+    input_text = input_text[:max_len]
+
+ollama_url = plpy.execute("SHOW app.ollama_api_url")[0]["app.ollama_api_url"]
+endpoint = f"{ollama_url}/api/embeddings"
+
+payload = {
+    "model": "${OLLAMA_MODEL}",
+    "prompt": input_text
+}
+
+try:
+    response = requests.post(endpoint, json=payload, timeout=30)
+    if response.status_code == 200:
+        return response.json()['embedding']
+    else:
+        plpy.warning(f"Ollama API error: {response.status_code}")
+        return None
+except Exception as e:
+    plpy.warning("Failed to generate embedding: " + str(e))
+    return None
+\$\$ LANGUAGE plpython3u;
+EOF
     
     log_success "Embedding generation function created"
 }
